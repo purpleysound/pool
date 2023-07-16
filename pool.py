@@ -13,6 +13,7 @@ FELT_GREEN = (44, 130, 87)
 
 TABLE_IMG = pygame.image.load('table.png')
 
+FRICTION = 1  # 1 is smooth, 0<fr<1 is rough
 E = 1
 I = pygame.math.Vector2(1, 0)
 J = pygame.math.Vector2(0, 1)
@@ -39,13 +40,14 @@ class Game:
             if event.type == pygame.MOUSEBUTTONDOWN:
                 print(pygame.mouse.get_pos())
 
-
     def update(self):
         for ball in self.balls:
             ball.update(self)
 
     def draw(self):
-        self.display.fill(BLACK)
+        self.display.fill(FELT_GREEN)
+        for hole in self.table.holes:
+            hole.draw(self.display)
         self.table.draw(self.display)
         for ball in self.balls:
             ball.draw(self.display)
@@ -53,9 +55,18 @@ class Game:
 
     def rack_balls(self):
         self.balls: list[Ball] = []
-        colours = [RED]*7 + [YELLOW]*7 + [BLACK]
+        colours = [RED, YELLOW, RED, RED, BLACK, YELLOW, YELLOW, RED, YELLOW, RED, RED, YELLOW, RED, YELLOW, YELLOW]
+        x = 600
+        y = 225 + 2*Ball.RADIUS
+        first_in_column_y = 225
         for i in range(15):
-            self.balls.append(Ball((SCREEN_X//2 + 2*Ball.RADIUS*(i-7), SCREEN_Y//2), colours[i]))
+            if i in [1, 3, 6, 10]:
+                x += 3**0.5 * Ball.RADIUS  # 2rcos(30)
+                first_in_column_y += 0.5 * Ball.RADIUS  # 2rsin(30)
+                y = first_in_column_y
+            else:
+                y -= 2*Ball.RADIUS
+            self.balls.append(Ball((x, y), colours[i]))
 
 
 class Table:
@@ -63,14 +74,20 @@ class Table:
     HEIGHT = 350
     def __init__(self) -> None:
         self.rect = TABLE_IMG.get_rect()
-        self.mask = pygame.mask.from_surface(TABLE_IMG.convert_alpha(), threshold=1)
+        self.holes = [Hole(hole) for hole in Hole.HOLES]
 
     def draw(self, display: pygame.Surface):
-        pygame.draw.rect(display, FELT_GREEN, self.rect)
         display.blit(TABLE_IMG, self.rect)
-        for pixel in self.mask.outline():
-            pygame.draw.circle(display, WHITE, (pixel[0] + self.rect.x, pixel[1] + self.rect.y), 1)
-        
+
+
+class Hole:
+    RADIUS = 25
+    HOLES = [(50, 50), (402, 40), (755, 50), (50, 407), (402, 417), (755, 407)]
+    def __init__(self, coordinates) -> None:
+        self.pos = pygame.math.Vector2(coordinates)
+
+    def draw(self, display):
+        pygame.draw.circle(display, BLACK, (self.pos.x, self.pos.y), self.RADIUS)        
 
 
 class Ball:
@@ -79,24 +96,29 @@ class Ball:
         self.pos = pygame.math.Vector2(coordinates)
         self.colour = colour
         self.moving = False
-        self.velocity = pygame.math.Vector2(5, 0)
-        self.moving = True
+        self.velocity = pygame.math.Vector2(0, 0)
         self.velocity = self.velocity.rotate(random.randint(0, 360))
         self.collided_last_frame = False
-
 
     def update(self, game: Game):
         self.pos += self.velocity
         if self.velocity.length() > 0.1:
             self.moving = True
-            self.velocity *= 1
+            self.velocity *= FRICTION
         else:
-            self.velocity = pygame.math.Vector2(0, 0)
+            self.velocity = pygame.math.Vector2(5, 0)
             self.moving = False
-
+        
+        self.check_pocketed(game)
         self.check_collisions(game)
 
-    def check_collisions(self, game):
+    def check_pocketed(self, game: Game):
+        for hole in game.table.holes:
+            if self.distance_to_ball(hole) < hole.RADIUS + 0.5*self.RADIUS:
+                game.balls.remove(self)
+                break
+
+    def check_collisions(self, game: Game):
         if self.collided_last_frame:
             self.collided_last_frame = False
             return
@@ -113,15 +135,14 @@ class Ball:
                 self.pos.x = 50 + self.RADIUS
             else:
                 self.pos.x = 750 - self.RADIUS
-            self.velocity.x *= -1
+            self.velocity.x *= -E
         if self.pos.y < 50 + self.RADIUS or self.pos.y > 400 - self.RADIUS:
             if self.pos.y < 50 + self.RADIUS:
                 self.pos.y = 50 + self.RADIUS
             else:
                 self.pos.y = 400 - self.RADIUS
-            self.velocity.y *= -1
+            self.velocity.y *= -E
         
-    
     def distance_to_ball(self, other):
         return (self.pos - other.pos).length()
     
@@ -144,12 +165,8 @@ class Ball:
         self.velocity += (other_dot - self_dot) * collision * 0.5*(1+E)
         other.velocity += (self_dot - other_dot) * collision * 0.5*(1+E)
 
-        
-
     def draw(self, display):
-        pygame.draw.circle(display, self.colour, (self.pos.x, self.pos.y), self.RADIUS)
-
-
+        pygame.draw.circle(display, self.colour, (int(self.pos.x), int(self.pos.y)), self.RADIUS)
 
 
 if __name__ == '__main__':
