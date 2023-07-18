@@ -30,7 +30,6 @@ class Game:
         self.running = True
         self.table = Table()
         self.rack_balls()
-        self.balls.append(CueBall((200, 225)))
 
     def run(self):
         while self.running:
@@ -43,6 +42,9 @@ class Game:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    self.rack_balls()
 
             if not any(ball.moving for ball in self.balls):
                 if event.type == pygame.MOUSEBUTTONDOWN:
@@ -72,6 +74,7 @@ class Game:
         for i in range(5):
             for j in range(i+1):
                 self.balls.append(Ball((600 + 2*i*Ball.RADIUS, 225 + (2*j-i)*Ball.RADIUS), colours.pop(0)))
+        self.balls.append(CueBall((200, 225)))
 
 
 class Table:
@@ -212,7 +215,7 @@ class CueBall(Ball):
 
     def draw(self, display):
         super().draw(display)
-        if self.can_be_shot:
+        if self.can_be_shot:  # Cue
             mouse_pos = pygame.math.Vector2(*pygame.mouse.get_pos())
             delta = self.pos - mouse_pos  # rotated 180 because cue is behind ball
             delta = delta.normalize()
