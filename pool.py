@@ -11,14 +11,17 @@ BLACK = (0, 0, 0)
 YELLOW = (255, 255, 0)
 WHITE = (255, 255, 255)
 FELT_GREEN = (44, 130, 87)
+CUE_WOOD_COLOUR = (139, 69, 19)
 
 pygame.init()
 TABLE_IMG = pygame.image.load('table.png')
 
 FRICTION = 0.99  # 1 is smooth, 0<fr<1 is rough
+COLLISION_DELAY = 0  # number of frames between ball collisions, prevents balls from getting stuck together but makes break less realistic
 E = 1
 I = pygame.math.Vector2(1, 0)
 J = pygame.math.Vector2(0, 1)
+OUT_OF_BOUNDS = pygame.math.Vector2(-100, -100)
 
 class Game:
     def __init__(self):
@@ -40,12 +43,14 @@ class Game:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                self.cue_start_time = time.time()
-            if event.type == pygame.MOUSEBUTTONUP:
-                self.cue_end_time = time.time()
-                velocity = min(10*(self.cue_end_time - self.cue_start_time), 20)
-                self.balls[-1].project(velocity, pygame.mouse.get_pos())
+
+            if not any(ball.moving for ball in self.balls):
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    self.cue_start_time = time.time()
+                if event.type == pygame.MOUSEBUTTONUP:
+                    self.cue_end_time = time.time()
+                    velocity = min(10*(self.cue_end_time - self.cue_start_time), 20)
+                    self.balls[-1].project(velocity, pygame.mouse.get_pos())
 
     def update(self):
         for ball in self.balls:
@@ -96,17 +101,21 @@ class Ball:
         self.pos = pygame.math.Vector2(coordinates)
         self.colour = colour
         self.velocity = pygame.math.Vector2(0, 0)
+        self.moving = False
         self.velocity = self.velocity.rotate(random.randint(0, 360))
-        self.collided_last_frame = False
+        self.frames_since_last_ball_collision = 0
 
     def update(self, game: Game):
         self.pos += self.velocity
         if self.velocity.length() > 0.1:
             self.velocity *= FRICTION
+            self.moving = True
         else:
             self.velocity = pygame.math.Vector2(0, 0)
+            self.moving = False
         
         self.check_pocketed(game)
+        self.frames_since_last_ball_collision += 1
         self.check_collisions(game)
 
     def check_pocketed(self, game: Game):
@@ -116,17 +125,10 @@ class Ball:
                 break
 
     def check_collisions(self, game: Game):
-        if self.collided_last_frame:
-            self.collided_last_frame = False
-            return
-        
-        for ball in game.balls:
-            if ball is not self:
-                if self.distance_to_ball(ball) < 2*self.RADIUS:
-                    self.ball_collision(ball)
-                    self.collided_last_frame = True
-        
         # check for collisions with table
+        if self.pos == OUT_OF_BOUNDS:
+            return  # If this gets triggered accidentally i will personally throw a hissy fit
+
         if self.pos.x < 50 + self.RADIUS or self.pos.x > 750 - self.RADIUS:
             if self.pos.x < 50 + self.RADIUS:
                 self.pos.x = 50 + self.RADIUS
@@ -139,6 +141,15 @@ class Ball:
             else:
                 self.pos.y = 400 - self.RADIUS
             self.velocity.y *= -E
+
+        if self.frames_since_last_ball_collision < COLLISION_DELAY:
+            return
+        
+        for ball in game.balls:
+            if ball is not self:
+                if self.distance_to_ball(ball) < 2*self.RADIUS:
+                    self.ball_collision(ball)
+                    self.frames_since_last_ball_collision = 0  
         
     def distance_to_ball(self, other):
         return (self.pos - other.pos).length()
@@ -162,6 +173,11 @@ class Ball:
         self.velocity += (other_dot - self_dot) * collision * 0.5*(1+E)
         other.velocity += (self_dot - other_dot) * collision * 0.5*(1+E)
 
+        overlap = 2*self.RADIUS - (other.pos - self.pos).length()
+        assert overlap > 0
+        self.pos -= collision * overlap
+        other.pos += collision * overlap
+
     def get_pocketed(self, game: Game):
         game.balls.remove(self)
 
@@ -172,6 +188,16 @@ class Ball:
 class CueBall(Ball):
     def __init__(self, coordinates) -> None:
         super().__init__(coordinates, WHITE)
+        self.can_be_shot = True
+
+    def update(self, game: Game):
+        if any(ball.moving for ball in game.balls):
+            self.can_be_shot = False
+        else:
+            self.can_be_shot = True
+        if self.can_be_shot and self.pos == OUT_OF_BOUNDS:
+            self.pos = pygame.math.Vector2(200, 225)
+        super().update(game)
         
     def project(self, speed, target_coord):
         target = pygame.math.Vector2(target_coord)
@@ -181,8 +207,19 @@ class CueBall(Ball):
         self.velocity = target
 
     def get_pocketed(self, game: Game):
-        self.pos = pygame.math.Vector2(200, 225)
+        self.pos = OUT_OF_BOUNDS
         self.velocity = pygame.math.Vector2(0, 0)
+
+    def draw(self, display):
+        super().draw(display)
+        if self.can_be_shot:
+            mouse_pos = pygame.math.Vector2(*pygame.mouse.get_pos())
+            delta = self.pos - mouse_pos  # rotated 180 because cue is behind ball
+            delta = delta.normalize()
+            delta = delta * 2*self.RADIUS
+            start_pos = self.pos + delta
+            end_pos = self.pos + 100*delta
+            pygame.draw.line(display, CUE_WOOD_COLOUR, (start_pos.x, start_pos.y), (end_pos.x, end_pos.y), 5)
 
 
 if __name__ == '__main__':
